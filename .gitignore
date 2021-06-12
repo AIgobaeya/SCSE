@@ -1,3 +1,5 @@
 .idea
 venv
 assets/npy
+ObjectDetection/weights
+ObjectDetection/data
