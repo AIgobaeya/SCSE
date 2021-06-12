@@ -149,6 +149,8 @@ def test_simple(args):
 
             # Saving colormapped depth image
             disp_resized_np = disp_resized.squeeze().cpu().numpy()
+            name_dest_origin_npy = os.path.join(output_directory, "{}_origin_disp.npy".format(output_name))
+            np.save(name_dest_origin_npy, disp_resized_np)
             vmax = np.percentile(disp_resized_np, 95)
             normalizer = mpl.colors.Normalize(vmin=disp_resized_np.min(), vmax=vmax)
             mapper = cm.ScalarMappable(norm=normalizer, cmap='magma')
