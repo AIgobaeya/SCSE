@@ -8,10 +8,10 @@ import torch
 import torch.backends.cudnn as cudnn
 import argparse
 
-from utils import download_model_if_doesnt_exist
+from util import download_model_if_doesnt_exist
 
 import networks
-from utils import download_model_if_doesnt_exist
+from util import download_model_if_doesnt_exist
 from distance import calculate
 
 from models.experimental import attempt_load
@@ -48,7 +48,6 @@ def detect(weights='yolov5s.pt',  # model.pt path(s)
            half=False,  # use FP16 half-precision inference
            model_name='mono+stereo_640x192',
            no_cuda='',
-           ext='',
            pred_metric_depth='',
            fps=30
            ):
@@ -304,8 +303,6 @@ if __name__ == '__main__':
                             "mono_1024x320",
                             "stereo_1024x320",
                             "mono+stereo_1024x320"])
-    parser.add_argument('--ext', type=str,
-                        help='image extension to search for in folder', default="jpg")
     parser.add_argument("--no_cuda",
                         help='if set, disables CUDA',
                         action='store_true')
@@ -313,7 +310,7 @@ if __name__ == '__main__':
                         help='if set, predicts metric de instead of disparity. (This only '
                              'makes sense for stereo-trained KITTI models).',
                         action='store_true')
-    parser.add.argument("--fps", help='if set, predict unit time at fps of input video')
+    parser.add_argument("--fps", default=30, type=int, help='if set, predict unit time at fps of input video')
     opt = parser.parse_args()
     print(opt)
     check_requirements(exclude=('tensorboard', 'thop'))
