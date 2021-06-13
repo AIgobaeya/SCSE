@@ -1,1 +1,1 @@
-python main.py --weights ../ObjectDetection/yolov5s.pt --conf 0.5 --source road.mp4 --model_name mono+stereo_640x192
+python main.py --weights yolov5s.pt --conf 0.5 --source road.mp4 --model_name mono+stereo_640x192
