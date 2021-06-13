@@ -1,5 +1,9 @@
 .idea
 venv
-assets/npy
 ObjectDetection/weights
 ObjectDetection/data
+output
+
+__pycache__
+*.npy
+*.pyc
