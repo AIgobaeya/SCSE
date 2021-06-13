@@ -1,1 +1,0 @@
-python test_simple.py --image_path ../../assets/test_image.jpg --model_name mono+stereo_640x192
