@@ -2,6 +2,7 @@ import os
 import argparse
 import time
 from pathlib import Path
+import datetime
 
 import cv2
 import torch
@@ -25,6 +26,7 @@ from od.utils.plots import colors, plot_one_box
 from od.utils.torch_utils import select_device, load_classifier, time_synchronized
 
 from de.distance_estimation import calculate
+
 
 @torch.no_grad()
 def detect(weights='yolov5s.pt',  # model.pt path(s)
@@ -137,6 +139,25 @@ def detect(weights='yolov5s.pt',  # model.pt path(s)
     if device.type != 'cpu':
         model(torch.zeros(1, 3, imgsz, imgsz).to(device).type_as(next(model.parameters())))  # run once
     t0 = time.time()
+
+    # todo: origin image 디렉토리 생성
+    # 현재 서버시간 측정
+    now = datetime.datetime.now()
+    formattedDate = now.strftime("%Y%m%d%H%M%S")
+
+    # 아웃풋 디렉토리 생성
+    output_path = './output/'
+    if not os.path.exists(output_path):
+        os.mkdir(output_path)
+
+    if not os.path.exists(output_path + formattedDate):
+        output_path = output_path + formattedDate
+        os.mkdir(output_path)
+
+    # todo: index 초기 생성
+    idx = 0  # 인덱스 초기 할당
+    bbox_info = []  # 바운딩 박스 리스트 생성
+
     for path, img, im0s, vid_cap in dataset:
         img = torch.from_numpy(img).to(device)
         img = img.half() if half else img.float()  # uint8 to fp16/32
@@ -155,6 +176,9 @@ def detect(weights='yolov5s.pt',  # model.pt path(s)
         # Apply Classifier
         if classify:
             pred = apply_classifier(pred, modelc, img, im0s)
+
+        # todo: 프레임 증가
+        idx += 1
 
         # Process od
         for i, det in enumerate(pred):  # od per image
@@ -178,6 +202,10 @@ def detect(weights='yolov5s.pt',  # model.pt path(s)
                     n = (det[:, -1] == c).sum()  # od per class
                     s += f"{n} {names[int(c)]}{'s' * (n > 1)}, "  # add to string
 
+                # todo: 디폴트 30 FPS, 추후 수정
+                if idx in [1, 31]:
+                    cv2.imwrite(output_path + '/{}.jpg'.format(idx), im0)
+
                 # Write results
                 for *xyxy, conf, cls in reversed(det):
                     if save_txt:  # Write to file
@@ -188,6 +216,18 @@ def detect(weights='yolov5s.pt',  # model.pt path(s)
 
                     if save_img or save_crop or view_img:  # Add bbox to image
                         c = int(cls)  # integer class
+
+                        # todo: 좌표 값 출력
+                        xmin = xyxy[0].item()
+                        ymin = xyxy[1].item()
+                        xmax = xyxy[2].item()
+                        ymax = xyxy[3].item()
+
+                        path = output_path + f'/{idx}.jpg'  # 파일 명 추가
+                        if idx in [1, 31]:
+                            bbox_info.append([path, str(xmin), str(ymin), str(xmax), str(ymax)])
+                            # 바운딩 박스 리스트: bbox_info = [[frame1], [frame2]], frame1: [path, xmin, ymin, xmax, ymax]
+
                         label = None if hide_labels else (names[c] if hide_conf else f'{names[c]} {conf:.2f}')
                         plot_one_box(xyxy, im0, label=label, color=colors(c, True), line_thickness=line_thickness)
                         if save_crop:
@@ -228,6 +268,7 @@ def detect(weights='yolov5s.pt',  # model.pt path(s)
         strip_optimizer(weights)  # update model (to fix SourceChangeWarning)
 
     print(f'Done. ({time.time() - t0:.3f}s)')
+    print("바운딩 박스 정보 출려: ", bbox_info)
 
 
 if __name__ == '__main__':
