@@ -2,13 +2,16 @@ import os
 import time
 from pathlib import Path
 import datetime
+import asyncio
 
 import cv2
 import torch
 import torch.backends.cudnn as cudnn
+from torchvision import transforms
 import argparse
-
-from util import download_model_if_doesnt_exist
+import numpy as np
+import pandas as pd
+import PIL.Image as pil
 
 import networks
 from util import download_model_if_doesnt_exist
@@ -20,6 +23,43 @@ from utils.general import check_img_size, check_requirements, check_imshow, non_
     scale_coords, xyxy2xywh, strip_optimizer, set_logging, increment_path, save_one_box
 from utils.plots import colors, plot_one_box
 from utils.torch_utils import select_device, load_classifier, time_synchronized
+
+#todo: 비동기처리
+def depth_estimation(device, encoder, depth_decoder, feed_width, feed_height, frame_info, output_path):
+    output_directory = os.path.dirname(output_path)
+    paths = [frame_info[0]]
+    bbox_info = frame_info[1:]
+    npy_values = []
+
+    for idx, image_path in enumerate(paths):
+        if image_path.endswith("_disp.jpg"):
+            continue
+
+        input_image = pil.open(image_path).convert('RGB')
+        original_width, original_height = input_image.size
+        input_image = input_image.resize((feed_width, feed_height), pil.LANCZOS)
+        input_image = transforms.ToTensor()(input_image).unsqueeze(0)
+
+        input_image = input_image.to(device)
+        features = encoder(input_image)
+        outputs = depth_decoder(features)
+
+        disp = outputs[("disp", 0)]
+        disp_resized = torch.nn.functional.interpolate(
+            disp, (original_height, original_width), mode="bilinear", align_corners=False)
+
+        output_name = os.path.splitext(os.path.basename(image_path))[0]
+
+        disp_resized_np = disp_resized.squeeze().cpu().numpy()
+        name_dest_origin_npy = os.path.join(output_directory, "{}_origin_disp.npy".format(output_name))
+        np.save(name_dest_origin_npy, disp_resized_np)
+
+        df = pd.DataFrame(disp_resized_np)
+        npy_values.append(df[int(len(df.columns) / 2)][int(len(df.index) / 2)])
+        min_npy_frame = df.iloc[int(bbox_info[idx][0]):int(bbox_info[idx][2]), int(bbox_info[idx][1]):int(bbox_info[idx][3])].values.min()
+        npy_values.append(min_npy_frame)
+
+        return npy_values
 
 
 @torch.no_grad()
@@ -77,10 +117,10 @@ def detect(weights='yolov5s.pt',  # model.pt path(s)
               "models. For mono-trained models, output depths will not in metric space.")
 
     download_model_if_doesnt_exist(model_name)
-    model_path = os.path.join("de/models", model_name)
+    model_path = os.path.join("models", model_name)
     print("-> Loading model from ", model_path)
     encoder_path = os.path.join(model_path, "encoder.pth")
-    depth_decoder_path = os.path.join(model_path, "de.pth")
+    depth_decoder_path = os.path.join(model_path, "depth.pth")
 
     # LOADING PRETRAINED MODEL
     print("   Loading pretrained encoder")
@@ -133,7 +173,7 @@ def detect(weights='yolov5s.pt',  # model.pt path(s)
         model(torch.zeros(1, 3, imgsz, imgsz).to(device).type_as(next(model.parameters())))  # run once
     t0 = time.time()
 
-    # todo: origin image 디렉토리 생성
+    # 디렉토리 생성
     # 현재 서버시간 측정
     now = datetime.datetime.now()
     formattedDate = now.strftime("%Y%m%d%H%M%S")
@@ -147,9 +187,14 @@ def detect(weights='yolov5s.pt',  # model.pt path(s)
         output_path = output_path + formattedDate
         os.mkdir(output_path)
 
-    # todo: index 초기 생성
-    idx = 0  # 인덱스 초기 할당
-    bbox_info = []  # 바운딩 박스 리스트 생성
+    #todo: 초기화
+    # index 초기 생성
+    idx = 0             # 인덱스 초기 할당
+    bbox_infos = []      # 바운딩 박스 리스트 생성
+    npy_values = []     # np_array 리스트 (frame1 min, frame2 min, middle pos)
+    bbox_count = 0      # 바운딩 박스 카운팅
+    able = False        # 프레임 2장 스냅샷 생성 여부 및 middle npy value 값 측정 확인
+    speed = -1
 
     for path, img, im0s, vid_cap in dataset:
         img = torch.from_numpy(img).to(device)
@@ -170,7 +215,7 @@ def detect(weights='yolov5s.pt',  # model.pt path(s)
         if classify:
             pred = apply_classifier(pred, modelc, img, im0s)
 
-        # todo: 프레임 증가
+        # 프레임 증가
         idx += 1
 
         # Process od
@@ -195,7 +240,7 @@ def detect(weights='yolov5s.pt',  # model.pt path(s)
                     n = (det[:, -1] == c).sum()  # od per class
                     s += f"{n} {names[int(c)]}{'s' * (n > 1)}, "  # add to string
 
-                # todo: 디폴트 30 FPS, 추후 수정
+                # 디폴트 30 FPS, 추후 수정
                 if idx in [1, 31]:
                     cv2.imwrite(output_path + '/{}.jpg'.format(idx), im0)
 
@@ -210,7 +255,7 @@ def detect(weights='yolov5s.pt',  # model.pt path(s)
                     if save_img or save_crop or view_img:  # Add bbox to image
                         c = int(cls)  # integer class
 
-                        # todo: 좌표 값 출력
+                        # 좌표 값 출력
                         xmin = xyxy[0].item()
                         ymin = xyxy[1].item()
                         xmax = xyxy[2].item()
@@ -218,11 +263,23 @@ def detect(weights='yolov5s.pt',  # model.pt path(s)
 
                         path = output_path + f'/{idx}.jpg'  # 파일 명 추가
                         if idx in [1, 31]:
-                            bbox_info.append([path, str(xmin), str(ymin), str(xmax), str(ymax)])
                             # 바운딩 박스 리스트: bbox_info = [[frame1], [frame2]], frame1: [path, xmin, ymin, xmax, ymax]
+                            bbox_info = [path, str(xmin), str(ymin), str(xmax), str(ymax)]
+                            bbox_infos.append(bbox_info)
+                            # bbox_infos[bbox_count]
+                            bbox_count += 1
+                            npy_value = depth_estimation(device, encoder, depth_decoder, feed_width, feed_height, bbox_info, output_path)
+                            npy_values.append(npy_value)
+
+                        if bbox_count == 2 and not able:
+                            #todo: 비동기 일 때
+                            able = True
+
+                        if able:
+                            speed = calculate(npy_values, fps)
 
                         label = None if hide_labels else (names[c] if hide_conf else f'{names[c]} {conf:.2f}')
-                        plot_one_box(xyxy, im0, label=label, color=colors(c, True), line_thickness=line_thickness)
+                        plot_one_box(xyxy, im0, label=label, color=colors(c, True), line_thickness=line_thickness, speed=speed)
                         if save_crop:
                             save_one_box(xyxy, imc, file=save_dir / 'crops' / names[c] / f'{p.stem}.jpg', BGR=True)
 
@@ -261,7 +318,7 @@ def detect(weights='yolov5s.pt',  # model.pt path(s)
         strip_optimizer(weights)  # update model (to fix SourceChangeWarning)
 
     print(f'Done. ({time.time() - t0:.3f}s)')
-    print("바운딩 박스 정보 출려: ", bbox_info)
+    print("바운딩 박스 정보 출력 : ", bbox_info)
 
 
 if __name__ == '__main__':
