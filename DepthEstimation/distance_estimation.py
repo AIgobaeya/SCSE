@@ -69,10 +69,10 @@ def calculate(npy_values, time_diff):
     horizontal_frame1 = math.sqrt(depth_frame1**2 - h**2)
     horizontal_frame2 = math.sqrt(depth_frame2**2 - h**2)
 
-    distance = (horizontal_frame1 - horizontal_frame2) / time_diff
-    distance = distance / 1000 * 3600
+    speed = (horizontal_frame1 - horizontal_frame2) / time_diff
+    speed = speed / 1000 * 3600
 
-    return round(distance,1)
+    return round(speed, 1)
 
 
 def distance_estimation(args, output_dir, frame1, frame2):
@@ -184,10 +184,10 @@ def distance_estimation(args, output_dir, frame1, frame2):
 
     #todo
     # time diff : 1
-    distance = calculate(npy_values, 1)
+    speed = calculate(npy_values, 1)
 
     print('-> Done!')
-    print("distance : " + str(distance) + "km/h")
+    print("speed : " + str(speed) + "km/h")
 
 
 if __name__ == '__main__':
