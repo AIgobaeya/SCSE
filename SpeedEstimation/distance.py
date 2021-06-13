@@ -6,7 +6,7 @@ def calculate(npy_values, fps):
     # angle = 0
     # middle = h / math.cos(angle)
     middle_ratio = min(npy_values[0][0], npy_values[1][0])
-    middle = 300 # 300m
+    middle = 100
 
     depth_frame1 = npy_values[0][1] * middle / middle_ratio
     depth_frame2 = npy_values[1][1] * middle / middle_ratio

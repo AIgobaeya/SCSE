@@ -56,7 +56,7 @@ def depth_estimation(device, encoder, depth_decoder, feed_width, feed_height, fr
 
         df = pd.DataFrame(disp_resized_np)
         npy_values.append(df[int(len(df.columns) / 2)][int(len(df.index) / 2)])
-        min_npy_frame = df.iloc[int(bbox_info[idx][0]):int(bbox_info[idx][2]), int(bbox_info[idx][1]):int(bbox_info[idx][3])].values.min()
+        min_npy_frame = df.iloc[int(float(bbox_info[0])):int(float(bbox_info[2])), int(float(bbox_info[1])):int(float(bbox_info[3]))].values.min()
         npy_values.append(min_npy_frame)
 
         return npy_values
@@ -318,7 +318,7 @@ def detect(weights='yolov5s.pt',  # model.pt path(s)
         strip_optimizer(weights)  # update model (to fix SourceChangeWarning)
 
     print(f'Done. ({time.time() - t0:.3f}s)')
-    print("바운딩 박스 정보 출력 : ", bbox_info)
+    print("바운딩 박스 정보 출력 : ", bbox_infos)
 
 
 if __name__ == '__main__':
