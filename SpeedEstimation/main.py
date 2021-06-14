@@ -24,6 +24,11 @@ from utils.general import check_img_size, check_requirements, check_imshow, non_
 from utils.plots import colors, plot_one_box
 from utils.torch_utils import select_device, load_classifier, time_synchronized
 
+from deep_sort_pytorch.utils.parser import get_config
+from deep_sort_pytorch.deep_sort import DeepSort
+
+palette = (2 ** 11 - 1, 2 ** 15 - 1, 2 ** 20 - 1)
+
 #todo: 비동기처리
 def depth_estimation(device, encoder, depth_decoder, feed_width, feed_height, frame_info, output_path):
     output_directory = os.path.dirname(output_path)
@@ -62,6 +67,59 @@ def depth_estimation(device, encoder, depth_decoder, feed_width, feed_height, fr
         return npy_values
 
 
+def xyxy_to_xywh(*xyxy):
+    bbox_left = min([xyxy[0].item(), xyxy[2].item()])
+    bbox_top = min([xyxy[1].item(), xyxy[3].item()])
+    bbox_w = abs(xyxy[0].item() - xyxy[2].item())
+    bbox_h = abs(xyxy[1].item() - xyxy[3].item())
+    x_c = (bbox_left + bbox_w / 2)
+    y_c = (bbox_top + bbox_h / 2)
+    w = bbox_w
+    h = bbox_h
+    return x_c, y_c, w, h
+
+
+def xyxy_to_tlwh(bbox_xyxy):
+    tlwh_bboxs = []
+    for i, box in enumerate(bbox_xyxy):
+        x1, y1, x2, y2 = [int(i) for i in box]
+        top = x1
+        left = y1
+        w = int(x2 - x1)
+        h = int(y2 - y1)
+        tlwh_obj = [top, left, w, h]
+        tlwh_bboxs.append(tlwh_obj)
+    return tlwh_bboxs
+
+
+def compute_color_for_labels(label):
+    color = [int((p * (label ** 2 - label + 1)) % 255) for p in palette]
+    return tuple(color)
+
+
+def draw_boxes(img, bbox, identities=None, offset=(0, 0), speed=None):
+    for i, box in enumerate(bbox):
+        x1, y1, x2, y2 = [int(i) for i in box]
+        x1 += offset[0]
+        x2 += offset[0]
+        y1 += offset[1]
+        y2 += offset[1]
+        # box text and bar
+        id = int(identities[i]) if identities is not None else 0
+        color = compute_color_for_labels(id)
+        if speed[id] > 0:
+            label = '{}{:d}: {}'.format("", id, speed[id])
+        else:
+            label = '{}{:d}'.format("", id)
+        t_size = cv2.getTextSize(label, cv2.FONT_HERSHEY_PLAIN, 2, 2)[0]
+        cv2.rectangle(img, (x1, y1), (x2, y2), color, 3)
+        cv2.rectangle(
+            img, (x1, y1), (x1 + t_size[0] + 3, y1 + t_size[1] + 4), color, -1)
+        cv2.putText(img, label, (x1, y1 +
+                                 t_size[1] + 4), cv2.FONT_HERSHEY_PLAIN, 2, [255, 255, 255], 2)
+    return img
+
+
 @torch.no_grad()
 def detect(weights='yolov5s.pt',  # model.pt path(s)
            source='data/images',  # file/dir/URL/glob, 0 for webcam
@@ -89,7 +147,8 @@ def detect(weights='yolov5s.pt',  # model.pt path(s)
            model_name='mono+stereo_640x192',
            no_cuda='',
            pred_metric_depth='',
-           fps=30
+           fps=30,
+           config_deepsort='deep_sort_pytorch/configs/deep_sort.yaml'
            ):
     save_img = not nosave and not source.endswith('.txt')  # save inference images
     webcam = source.isnumeric() or source.endswith('.txt') or source.lower().startswith(
@@ -145,6 +204,14 @@ def detect(weights='yolov5s.pt',  # model.pt path(s)
     depth_decoder.to(device)
     depth_decoder.eval()
 
+    cfg = get_config()
+    cfg.merge_from_file(config_deepsort)
+    deepsort = DeepSort(cfg.DEEPSORT.REID_CKPT,
+                        max_dist=cfg.DEEPSORT.MAX_DIST, min_confidence=cfg.DEEPSORT.MIN_CONFIDENCE,
+                        nms_max_overlap=cfg.DEEPSORT.NMS_MAX_OVERLAP, max_iou_distance=cfg.DEEPSORT.MAX_IOU_DISTANCE,
+                        max_age=cfg.DEEPSORT.MAX_AGE, n_init=cfg.DEEPSORT.N_INIT, nn_budget=cfg.DEEPSORT.NN_BUDGET,
+                        use_cuda=True)
+
     # Load model
     model = attempt_load(weights, map_location=device)  # load FP32 model
     stride = int(model.stride.max())  # model stride
@@ -190,13 +257,18 @@ def detect(weights='yolov5s.pt',  # model.pt path(s)
     #todo: 초기화
     # index 초기 생성
     idx = 0             # 인덱스 초기 할당
-    bbox_infos = []      # 바운딩 박스 리스트 생성
-    npy_values = []     # np_array 리스트 (frame1 min, frame2 min, middle pos)
-    bbox_count = 0      # 바운딩 박스 카운팅
-    able = False        # 프레임 2장 스냅샷 생성 여부 및 middle npy value 값 측정 확인
-    speed = -1
+    npy_values = []     # np_array 리스트
+    vehicles = []
+    flag = []
+    speed = []
+    for i in range(70):
+        vehicles.append(-1)
+        flag.append(False)
+        speed.append(-1)
+        npy_values.append([[0, 0], [0, 0]])
 
-    for path, img, im0s, vid_cap in dataset:
+
+    for frame_idx, path, img, im0s, vid_cap in dataset:
         img = torch.from_numpy(img).to(device)
         img = img.half() if half else img.float()  # uint8 to fp16/32
         img /= 255.0  # 0 - 255 to 0.0 - 1.0
@@ -218,7 +290,7 @@ def detect(weights='yolov5s.pt',  # model.pt path(s)
         # 프레임 증가
         idx += 1
 
-        # Process od
+        # Process detection
         for i, det in enumerate(pred):  # od per image
             if webcam:  # batch_size >= 1
                 p, s, im0, frame = path[i], f'{i}: ', im0s[i].copy(), dataset.count
@@ -231,7 +303,7 @@ def detect(weights='yolov5s.pt',  # model.pt path(s)
             s += '%gx%g ' % img.shape[2:]  # print string
             gn = torch.tensor(im0.shape)[[1, 0, 1, 0]]  # normalization gain whwh
             imc = im0.copy() if save_crop else im0  # for save_crop
-            if len(det):
+            if det is not None and len(det):
                 # Rescale boxes from img_size to im0 size
                 det[:, :4] = scale_coords(img.shape[2:], det[:, :4], im0.shape).round()
 
@@ -244,44 +316,72 @@ def detect(weights='yolov5s.pt',  # model.pt path(s)
                 if idx in [1, 31]:
                     cv2.imwrite(output_path + '/{}.jpg'.format(idx), im0)
 
-                # Write results
-                for *xyxy, conf, cls in reversed(det):
-                    if save_txt:  # Write to file
-                        xywh = (xyxy2xywh(torch.tensor(xyxy).view(1, 4)) / gn).view(-1).tolist()  # normalized xywh
-                        line = (cls, *xywh, conf) if save_conf else (cls, *xywh)  # label format
-                        with open(txt_path + '.txt', 'a') as f:
-                            f.write(('%g ' * len(line)).rstrip() % line + '\n')
+                xywh_bboxs = []
+                confs = []
 
-                    if save_img or save_crop or view_img:  # Add bbox to image
-                        c = int(cls)  # integer class
+                for *xyxy, conf, cls in det:
+                    # to deep sort format
+                    x_c, y_c, bbox_w, bbox_h = xyxy_to_xywh(*xyxy)
+                    xywh_obj = [x_c, y_c, bbox_w, bbox_h]
+                    xywh_bboxs.append(xywh_obj)
+                    confs.append([conf.item()])
 
-                        # 좌표 값 출력
-                        xmin = xyxy[0].item()
-                        ymin = xyxy[1].item()
-                        xmax = xyxy[2].item()
-                        ymax = xyxy[3].item()
+                xywhs = torch.Tensor(xywh_bboxs)
+                confss = torch.Tensor(confs)
 
-                        path = output_path + f'/{idx}.jpg'  # 파일 명 추가
-                        if idx in [1, 31]:
-                            # 바운딩 박스 리스트: bbox_info = [[frame1], [frame2]], frame1: [path, xmin, ymin, xmax, ymax]
+                outputs = deepsort.update(xywhs, confss, im0)
+
+                if len(outputs) > 0:
+                    bbox_xyxy = outputs[:, :4]
+                    identities = outputs[:, -1]
+                    draw_boxes(im0, bbox_xyxy, identities, speed)
+
+                    for bbox, identity in enumerate(zip(bbox_xyxy, identities)):
+                        xmin = bbox[0]
+                        ymin = bbox[1]
+                        xmax = bbox[2]
+                        ymax = bbox[3]
+
+                        path = output_path + f'/{identity}_{frame_idx}.jpg'  # 파일 명 추가
+                        if vehicles[identity] == -1:
+                            vehicles[identity] = frame_idx
                             bbox_info = [path, str(xmin), str(ymin), str(xmax), str(ymax)]
-                            bbox_infos.append(bbox_info)
-                            # bbox_infos[bbox_count]
-                            bbox_count += 1
-                            npy_value = depth_estimation(device, encoder, depth_decoder, feed_width, feed_height, bbox_info, output_path)
-                            npy_values.append(npy_value)
+                            npy_value = depth_estimation(device, encoder, depth_decoder, feed_width, feed_height,
+                                                         bbox_info, output_path)
+                            npy_values[identity][0] = npy_value
+                        else:
+                            if frame_idx - vehicles[identity] >= 30:
+                                if not flag:
+                                    bbox_info = [path, str(xmin), str(ymin), str(xmax), str(ymax)]
+                                    npy_value = depth_estimation(device, encoder, depth_decoder, feed_width,
+                                                                 feed_height,
+                                                                 bbox_info, output_path)
+                                    npy_values[identity][0] = npy_value
+                                    flag[identity] = True
+                            else:
+                                continue
 
-                        if bbox_count == 2 and not able:
-                            #todo: 비동기 일 때
-                            able = True
+                        if flag[identity]:
+                            speed[identity] = calculate(npy_values[identity], fps)
 
-                        if able:
-                            speed = calculate(npy_values, fps)
 
-                        label = None if hide_labels else (names[c] if hide_conf else f'{names[c]} {conf:.2f}')
-                        plot_one_box(xyxy, im0, label=label, color=colors(c, True), line_thickness=line_thickness, speed=speed)
-                        if save_crop:
-                            save_one_box(xyxy, imc, file=save_dir / 'crops' / names[c] / f'{p.stem}.jpg', BGR=True)
+                    # to MOT format
+                    tlwh_bboxs = xyxy_to_tlwh(bbox_xyxy)
+
+                    # Write MOT compliant results to file
+                    if save_txt:
+                        for j, (tlwh_bbox, output) in enumerate(zip(tlwh_bboxs, outputs)):
+                            bbox_top = tlwh_bbox[0]
+                            bbox_left = tlwh_bbox[1]
+                            bbox_w = tlwh_bbox[2]
+                            bbox_h = tlwh_bbox[3]
+                            identity = output[-1]
+                            with open(txt_path, 'a') as f:
+                                f.write(('%g ' * 10 + '\n') % (frame_idx, identity, bbox_top,
+                                                               bbox_left, bbox_w, bbox_h, -1, -1, -1,
+                                                               -1))  # label format
+            else:
+                deepsort.increment_ages()
 
             # Print time (inference + NMS)
             print(f'{s}Done. ({t2 - t1:.3f}s)')
@@ -318,7 +418,6 @@ def detect(weights='yolov5s.pt',  # model.pt path(s)
         strip_optimizer(weights)  # update model (to fix SourceChangeWarning)
 
     print(f'Done. ({time.time() - t0:.3f}s)')
-    print("바운딩 박스 정보 출력 : ", bbox_infos)
 
 
 if __name__ == '__main__':
@@ -368,6 +467,7 @@ if __name__ == '__main__':
                              'makes sense for stereo-trained KITTI models).',
                         action='store_true')
     parser.add_argument("--fps", default=30, type=int, help='if set, predict unit time at fps of input video')
+    parser.add_argument("--config_deepsort", type=str, default="deep_sort_pytorch/configs/deep_sort.yaml")
     opt = parser.parse_args()
     print(opt)
     check_requirements(exclude=('tensorboard', 'thop'))
