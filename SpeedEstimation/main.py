@@ -147,8 +147,7 @@ def detect(weights='yolov5s.pt',  # model.pt path(s)
            model_name='mono+stereo_640x192',
            no_cuda='',
            pred_metric_depth='',
-           fps=30,
-           config_deepsort='deep_sort_pytorch/configs/deep_sort.yaml'
+           fps=30
            ):
     save_img = not nosave and not source.endswith('.txt')  # save inference images
     webcam = source.isnumeric() or source.endswith('.txt') or source.lower().startswith(
@@ -204,6 +203,7 @@ def detect(weights='yolov5s.pt',  # model.pt path(s)
     depth_decoder.to(device)
     depth_decoder.eval()
 
+    config_deepsort='deep_sort_pytorch/configs/deep_sort.yaml'
     cfg = get_config()
     cfg.merge_from_file(config_deepsort)
     deepsort = DeepSort(cfg.DEEPSORT.REID_CKPT,
@@ -268,7 +268,7 @@ def detect(weights='yolov5s.pt',  # model.pt path(s)
         npy_values.append([[0, 0], [0, 0]])
 
 
-    for frame_idx, path, img, im0s, vid_cap in dataset:
+    for frame_idx, (path, img, im0s, vid_cap) in enumerate(dataset):
         img = torch.from_numpy(img).to(device)
         img = img.half() if half else img.float()  # uint8 to fp16/32
         img /= 255.0  # 0 - 255 to 0.0 - 1.0
@@ -312,10 +312,6 @@ def detect(weights='yolov5s.pt',  # model.pt path(s)
                     n = (det[:, -1] == c).sum()  # od per class
                     s += f"{n} {names[int(c)]}{'s' * (n > 1)}, "  # add to string
 
-                # 디폴트 30 FPS, 추후 수정
-                if idx in [1, 31]:
-                    cv2.imwrite(output_path + '/{}.jpg'.format(idx), im0)
-
                 xywh_bboxs = []
                 confs = []
 
@@ -334,13 +330,15 @@ def detect(weights='yolov5s.pt',  # model.pt path(s)
                 if len(outputs) > 0:
                     bbox_xyxy = outputs[:, :4]
                     identities = outputs[:, -1]
-                    draw_boxes(im0, bbox_xyxy, identities, speed)
+                    draw_boxes(im0, bbox_xyxy, identities, (0, 0), speed)
 
-                    for bbox, identity in enumerate(zip(bbox_xyxy, identities)):
+                    for ii, (bbox, identity) in enumerate(zip(bbox_xyxy, identities)):
                         xmin = bbox[0]
                         ymin = bbox[1]
                         xmax = bbox[2]
                         ymax = bbox[3]
+
+                        cv2.imwrite(output_path + '/{}_{}.jpg'.format(identity, frame_idx), im0)
 
                         path = output_path + f'/{identity}_{frame_idx}.jpg'  # 파일 명 추가
                         if vehicles[identity] == -1:
@@ -467,7 +465,6 @@ if __name__ == '__main__':
                              'makes sense for stereo-trained KITTI models).',
                         action='store_true')
     parser.add_argument("--fps", default=30, type=int, help='if set, predict unit time at fps of input video')
-    parser.add_argument("--config_deepsort", type=str, default="deep_sort_pytorch/configs/deep_sort.yaml")
     opt = parser.parse_args()
     print(opt)
     check_requirements(exclude=('tensorboard', 'thop'))
