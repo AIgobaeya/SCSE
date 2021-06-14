@@ -61,8 +61,7 @@ def depth_estimation(device, encoder, depth_decoder, feed_width, feed_height, fr
 
         df = pd.DataFrame(disp_resized_np)
         npy_values.append(df[int(len(df.columns) / 2)][int(len(df.index) / 2)])
-        min_npy_frame = df.iloc[int(float(bbox_info[0])):int(float(bbox_info[2])), int(float(bbox_info[1])):int(float(bbox_info[3]))].values.max()
-        npy_values.append(min_npy_frame)
+        npy_values.append(df[int((bbox_info[1] + bbox_info[3]) / 2)][int((bbox_info[0] + bbox_info[2]) / 2)])
 
         return npy_values
 
@@ -108,9 +107,9 @@ def draw_boxes(img, bbox, identities=None, offset=(0, 0), speed=None):
         id = int(identities[i]) if identities is not None else 0
         color = compute_color_for_labels(id)
         if speed[id] > 0:
-            label = '{}{:d}: {}'.format("", id, speed[id])
+            label = ' {}km/h'.format(speed[id])
         else:
-            label = '{}{:d}'.format("", id)
+            label = ' '
         t_size = cv2.getTextSize(label, cv2.FONT_HERSHEY_PLAIN, 2, 2)[0]
         cv2.rectangle(img, (x1, y1), (x2, y2), color, 3)
         cv2.rectangle(
@@ -261,7 +260,7 @@ def detect(weights='yolov5s.pt',  # model.pt path(s)
     vehicles = []
     flag = []
     speed = []
-    for i in range(70):
+    for i in range(100):
         vehicles.append(-1)
         flag.append(False)
         speed.append(-1)
@@ -349,12 +348,12 @@ def detect(weights='yolov5s.pt',  # model.pt path(s)
                             npy_values[identity][0] = npy_value
                         else:
                             if frame_idx - vehicles[identity] >= 30:
-                                if not flag:
+                                if not flag[identity]:
                                     bbox_info = [path, str(xmin), str(ymin), str(xmax), str(ymax)]
                                     npy_value = depth_estimation(device, encoder, depth_decoder, feed_width,
                                                                  feed_height,
                                                                  bbox_info, output_path)
-                                    npy_values[identity][0] = npy_value
+                                    npy_values[identity][1] = npy_value
                                     flag[identity] = True
                             else:
                                 continue
