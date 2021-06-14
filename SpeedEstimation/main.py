@@ -56,7 +56,7 @@ def depth_estimation(device, encoder, depth_decoder, feed_width, feed_height, fr
 
         df = pd.DataFrame(disp_resized_np)
         npy_values.append(df[int(len(df.columns) / 2)][int(len(df.index) / 2)])
-        min_npy_frame = df.iloc[int(float(bbox_info[0])):int(float(bbox_info[2])), int(float(bbox_info[1])):int(float(bbox_info[3]))].values.min()
+        min_npy_frame = df.iloc[int(float(bbox_info[0])):int(float(bbox_info[2])), int(float(bbox_info[1])):int(float(bbox_info[3]))].values.max()
         npy_values.append(min_npy_frame)
 
         return npy_values
