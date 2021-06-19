@@ -61,7 +61,7 @@ def depth_estimation(device, encoder, depth_decoder, feed_width, feed_height, fr
 
         df = pd.DataFrame(disp_resized_np)
         npy_values.append(df[int(len(df.columns) / 2)][int(len(df.index) / 2)])
-        npy_values.append(df[int((bbox_info[1] + bbox_info[3]) / 2)][int((bbox_info[0] + bbox_info[2]) / 2)])
+        npy_values.append(df[int((int(bbox_info[1]) + int(bbox_info[3])) / 2)][int((int(bbox_info[0]) + int(bbox_info[2])) / 2)])
 
         return npy_values
 
