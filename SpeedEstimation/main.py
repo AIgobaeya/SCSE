@@ -155,7 +155,7 @@ def detect(weights='yolov5s.pt',  # model.pt path(s)
     if (os.path.isfile('deep_sort_pytorch/deep_sort/deep/checkpoint/ckpt.t7')):
         pass
     else:
-        command = "'wget http://115.145.36.22:7000/scse/ckpt.t7' -P 'deep_sort_pytorch/deep_sort/deep/checkpoint/'"
+        command = "wget http://115.145.36.22:7000/scse/ckpt.t7 -P deep_sort_pytorch/deep_sort/deep/checkpoint"
         subprocess.call(command, shell=True)
 
     # Directories
