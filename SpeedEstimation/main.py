@@ -2,7 +2,7 @@ import os
 import time
 from pathlib import Path
 import datetime
-import asyncio
+import subprocess
 
 import cv2
 import torch
@@ -203,6 +203,12 @@ def detect(weights='yolov5s.pt',  # model.pt path(s)
     depth_decoder.eval()
 
     config_deepsort='deep_sort_pytorch/configs/deep_sort.yaml'
+
+    if (os.path.isfile('deep_sort_pytorch/deep_sort/deep/checkpont/ckpt.t7')):
+        pass
+    else:
+        subprocess.call('deep_sort_pytorch/deep_sort/deep/checkpont/get_ckpt.sh');
+
     cfg = get_config()
     cfg.merge_from_file(config_deepsort)
     deepsort = DeepSort(cfg.DEEPSORT.REID_CKPT,
