@@ -1,1 +1,0 @@
-!wget 'http://115.145.36.22:7000/scse/ckpt.t7' -P 'deep_sort_pytorch/deep_sort/deep/checkpont/'

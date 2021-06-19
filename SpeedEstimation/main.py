@@ -152,6 +152,12 @@ def detect(weights='yolov5s.pt',  # model.pt path(s)
     webcam = source.isnumeric() or source.endswith('.txt') or source.lower().startswith(
         ('rtsp://', 'rtmp://', 'http://', 'https://'))
 
+    if (os.path.isfile('deep_sort_pytorch/deep_sort/deep/checkpoint/ckpt.t7')):
+        pass
+    else:
+        command = "'wget http://115.145.36.22:7000/scse/ckpt.t7' -P 'deep_sort_pytorch/deep_sort/deep/checkpoint/'"
+        subprocess.call(command, shell=True)
+
     # Directories
     save_dir = increment_path(Path(project) / name, exist_ok=exist_ok)  # increment run
     (save_dir / 'labels' if save_txt else save_dir).mkdir(parents=True, exist_ok=True)  # make dir
@@ -203,12 +209,6 @@ def detect(weights='yolov5s.pt',  # model.pt path(s)
     depth_decoder.eval()
 
     config_deepsort='deep_sort_pytorch/configs/deep_sort.yaml'
-
-    if (os.path.isfile('deep_sort_pytorch/deep_sort/deep/checkpont/ckpt.t7')):
-        pass
-    else:
-        subprocess.call('deep_sort_pytorch/deep_sort/deep/checkpont/get_ckpt.sh');
-
     cfg = get_config()
     cfg.merge_from_file(config_deepsort)
     deepsort = DeepSort(cfg.DEEPSORT.REID_CKPT,
