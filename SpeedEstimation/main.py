@@ -116,9 +116,9 @@ def draw_boxes(img, bbox, identities=None, offset=(0, 0), speed=None):
         id = int(identities[i]) if identities is not None else 0
         color = compute_color_for_labels(id)
         if speed[id] > 0:
-            label = ' {}km/h'.format(speed[id])
+            label = '{}km/h'.format(speed[id])
         else:
-            label = ' '
+            label = ''
         t_size = cv2.getTextSize(label, cv2.FONT_HERSHEY_PLAIN, 2, 2)[0]
         cv2.rectangle(img, (x1, y1), (x2, y2), color, 3)
         cv2.rectangle(
@@ -129,7 +129,7 @@ def draw_boxes(img, bbox, identities=None, offset=(0, 0), speed=None):
 
 
 def objectCorrection(bbox_info):
-    cor = math.sqrt(pow(bbox_info[0][1] - bbox_info[1][1], 2) + pow(bbox_info[0][2] - bbox_info[1][2], 2) + pow(bbox_info[0][3] - bbox_info[1][3], 2) + pow(bbox_info[0][4] - bbox_info[1][4], 2))
+    cor = math.sqrt(pow(int(bbox_info[0][1]) - int(bbox_info[1][1]), 2) + pow(int(bbox_info[0][2]) - int(bbox_info[1][2]), 2) + pow(int(bbox_info[0][3]) - int(bbox_info[1][3]), 2) + pow(int(bbox_info[0][4]) - int(bbox_info[1][4]), 2))
 
     if cor < limitCorrection:
         return False
@@ -387,7 +387,7 @@ def detect(weights='yolov5s.pt',  # model.pt path(s)
                                 continue
 
                         if flag[identity]:
-                            if objectCorrection(bbox_infos[identity])
+                            if objectCorrection(bbox_infos[identity]):
                                 speed[identity] = calculate(npy_values[identity], fps)
                             else:
                                 speed[identity] = -1
