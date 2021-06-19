@@ -1,3 +1,4 @@
+import math
 import os
 import time
 from pathlib import Path
@@ -28,6 +29,7 @@ from deep_sort_pytorch.utils.parser import get_config
 from deep_sort_pytorch.deep_sort import DeepSort
 
 palette = (2 ** 11 - 1, 2 ** 15 - 1, 2 ** 20 - 1)
+limitCorrection = 10
 
 #todo: 비동기처리
 def depth_estimation(device, encoder, depth_decoder, feed_width, feed_height, frame_info, output_path):
@@ -61,7 +63,14 @@ def depth_estimation(device, encoder, depth_decoder, feed_width, feed_height, fr
 
         df = pd.DataFrame(disp_resized_np)
         npy_values.append(df[int(len(df.columns) / 2)][int(len(df.index) / 2)])
-        npy_values.append(df[int((int(bbox_info[1]) + int(bbox_info[3])) / 2)][int((int(bbox_info[0]) + int(bbox_info[2])) / 2)])
+
+        rangeAbleCol = True if (int(len(df.columns)) >= int((int(bbox_info[1]) + int(bbox_info[3])) / 2)) else False
+        rangeAbleRow = True if (int(len(df.index)) >= int((int(bbox_info[0]) + int(bbox_info[2])) / 2)) else False
+
+        if rangeAbleCol & rangeAbleRow:
+            npy_values.append(df[int((int(bbox_info[1]) + int(bbox_info[3])) / 2)][int((int(bbox_info[0]) + int(bbox_info[2])) / 2)])
+        else:
+            npy_values.append(df[int(len(df.columns) / 2)][int(len(df.index) / 2)])
 
         return npy_values
 
@@ -117,6 +126,15 @@ def draw_boxes(img, bbox, identities=None, offset=(0, 0), speed=None):
         cv2.putText(img, label, (x1, y1 +
                                  t_size[1] + 4), cv2.FONT_HERSHEY_PLAIN, 2, [255, 255, 255], 2)
     return img
+
+
+def objectCorrection(bbox_info):
+    cor = math.sqrt(pow(bbox_info[0][1] - bbox_info[1][1], 2) + pow(bbox_info[0][2] - bbox_info[1][2], 2) + pow(bbox_info[0][3] - bbox_info[1][3], 2) + pow(bbox_info[0][4] - bbox_info[1][4], 2))
+
+    if cor < limitCorrection:
+        return False
+    else:
+        return True
 
 
 @torch.no_grad()
@@ -266,11 +284,13 @@ def detect(weights='yolov5s.pt',  # model.pt path(s)
     vehicles = []
     flag = []
     speed = []
+    bbox_infos = []
     for i in range(100):
         vehicles.append(-1)
         flag.append(False)
         speed.append(-1)
         npy_values.append([[0, 0], [0, 0]])
+        bbox_infos.append([["", "", "", "", ""], ["", "", "", "", ""]])
 
 
     for frame_idx, (path, img, im0s, vid_cap) in enumerate(dataset):
@@ -351,6 +371,7 @@ def detect(weights='yolov5s.pt',  # model.pt path(s)
                             bbox_info = [path, str(xmin), str(ymin), str(xmax), str(ymax)]
                             npy_value = depth_estimation(device, encoder, depth_decoder, feed_width, feed_height,
                                                          bbox_info, output_path)
+                            bbox_infos[identity][0] = bbox_info
                             npy_values[identity][0] = npy_value
                         else:
                             if frame_idx - vehicles[identity] >= 30:
@@ -359,13 +380,17 @@ def detect(weights='yolov5s.pt',  # model.pt path(s)
                                     npy_value = depth_estimation(device, encoder, depth_decoder, feed_width,
                                                                  feed_height,
                                                                  bbox_info, output_path)
+                                    bbox_infos[identity][1] = bbox_info
                                     npy_values[identity][1] = npy_value
                                     flag[identity] = True
                             else:
                                 continue
 
                         if flag[identity]:
-                            speed[identity] = calculate(npy_values[identity], fps)
+                            if objectCorrection(bbox_infos[identity])
+                                speed[identity] = calculate(npy_values[identity], fps)
+                            else:
+                                speed[identity] = -1
 
 
                     # to MOT format
