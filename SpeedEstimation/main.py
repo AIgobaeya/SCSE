@@ -1,8 +1,9 @@
+import math
 import os
 import time
 from pathlib import Path
 import datetime
-import asyncio
+import subprocess
 
 import cv2
 import torch
@@ -28,6 +29,7 @@ from deep_sort_pytorch.utils.parser import get_config
 from deep_sort_pytorch.deep_sort import DeepSort
 
 palette = (2 ** 11 - 1, 2 ** 15 - 1, 2 ** 20 - 1)
+limitCorrection = 10
 
 #todo: 비동기처리
 def depth_estimation(device, encoder, depth_decoder, feed_width, feed_height, frame_info, output_path):
@@ -61,7 +63,14 @@ def depth_estimation(device, encoder, depth_decoder, feed_width, feed_height, fr
 
         df = pd.DataFrame(disp_resized_np)
         npy_values.append(df[int(len(df.columns) / 2)][int(len(df.index) / 2)])
-        npy_values.append(df[int((bbox_info[1] + bbox_info[3]) / 2)][int((bbox_info[0] + bbox_info[2]) / 2)])
+
+        rangeAbleCol = True if (int(len(df.columns)) >= int((int(bbox_info[1]) + int(bbox_info[3])) / 2)) else False
+        rangeAbleRow = True if (int(len(df.index)) >= int((int(bbox_info[0]) + int(bbox_info[2])) / 2)) else False
+
+        if rangeAbleCol & rangeAbleRow:
+            npy_values.append(df[int((int(bbox_info[1]) + int(bbox_info[3])) / 2)][int((int(bbox_info[0]) + int(bbox_info[2])) / 2)])
+        else:
+            npy_values.append(df[int(len(df.columns) / 2)][int(len(df.index) / 2)])
 
         return npy_values
 
@@ -107,9 +116,9 @@ def draw_boxes(img, bbox, identities=None, offset=(0, 0), speed=None):
         id = int(identities[i]) if identities is not None else 0
         color = compute_color_for_labels(id)
         if speed[id] > 0:
-            label = ' {}km/h'.format(speed[id])
+            label = '{}km/h'.format(speed[id])
         else:
-            label = ' '
+            label = ''
         t_size = cv2.getTextSize(label, cv2.FONT_HERSHEY_PLAIN, 2, 2)[0]
         cv2.rectangle(img, (x1, y1), (x2, y2), color, 3)
         cv2.rectangle(
@@ -117,6 +126,15 @@ def draw_boxes(img, bbox, identities=None, offset=(0, 0), speed=None):
         cv2.putText(img, label, (x1, y1 +
                                  t_size[1] + 4), cv2.FONT_HERSHEY_PLAIN, 2, [255, 255, 255], 2)
     return img
+
+
+def objectCorrection(bbox_info):
+    cor = math.sqrt(pow(int(bbox_info[0][1]) - int(bbox_info[1][1]), 2) + pow(int(bbox_info[0][2]) - int(bbox_info[1][2]), 2) + pow(int(bbox_info[0][3]) - int(bbox_info[1][3]), 2) + pow(int(bbox_info[0][4]) - int(bbox_info[1][4]), 2))
+
+    if cor < limitCorrection:
+        return False
+    else:
+        return True
 
 
 @torch.no_grad()
@@ -132,7 +150,7 @@ def detect(weights='yolov5s.pt',  # model.pt path(s)
            save_conf=False,  # save confidences in --save-txt labels
            save_crop=False,  # save cropped prediction boxes
            nosave=False,  # do not save images/videos
-           classes=None,  # filter by class: --class 0, or --class 0 2 3
+           classes=2,  # filter by class: --class 0, or --class 0 2 3
            agnostic_nms=False,  # class-agnostic NMS
            augment=False,  # augmented inference
            update=False,  # update all models
@@ -151,6 +169,12 @@ def detect(weights='yolov5s.pt',  # model.pt path(s)
     save_img = not nosave and not source.endswith('.txt')  # save inference images
     webcam = source.isnumeric() or source.endswith('.txt') or source.lower().startswith(
         ('rtsp://', 'rtmp://', 'http://', 'https://'))
+
+    if (os.path.isfile('deep_sort_pytorch/deep_sort/deep/checkpoint/ckpt.t7')):
+        pass
+    else:
+        command = "wget http://115.145.36.22:7000/scse/ckpt.t7 -P deep_sort_pytorch/deep_sort/deep/checkpoint"
+        subprocess.call(command, shell=True)
 
     # Directories
     save_dir = increment_path(Path(project) / name, exist_ok=exist_ok)  # increment run
@@ -260,11 +284,13 @@ def detect(weights='yolov5s.pt',  # model.pt path(s)
     vehicles = []
     flag = []
     speed = []
+    bbox_infos = []
     for i in range(100):
         vehicles.append(-1)
         flag.append(False)
         speed.append(-1)
         npy_values.append([[0, 0], [0, 0]])
+        bbox_infos.append([["", "", "", "", ""], ["", "", "", "", ""]])
 
 
     for frame_idx, (path, img, im0s, vid_cap) in enumerate(dataset):
@@ -345,6 +371,7 @@ def detect(weights='yolov5s.pt',  # model.pt path(s)
                             bbox_info = [path, str(xmin), str(ymin), str(xmax), str(ymax)]
                             npy_value = depth_estimation(device, encoder, depth_decoder, feed_width, feed_height,
                                                          bbox_info, output_path)
+                            bbox_infos[identity][0] = bbox_info
                             npy_values[identity][0] = npy_value
                         else:
                             if frame_idx - vehicles[identity] >= 30:
@@ -353,13 +380,17 @@ def detect(weights='yolov5s.pt',  # model.pt path(s)
                                     npy_value = depth_estimation(device, encoder, depth_decoder, feed_width,
                                                                  feed_height,
                                                                  bbox_info, output_path)
+                                    bbox_infos[identity][1] = bbox_info
                                     npy_values[identity][1] = npy_value
                                     flag[identity] = True
                             else:
                                 continue
 
                         if flag[identity]:
-                            speed[identity] = calculate(npy_values[identity], fps)
+                            if objectCorrection(bbox_infos[identity]):
+                                speed[identity] = calculate(npy_values[identity], fps)
+                            else:
+                                speed[identity] = -1
 
 
                     # to MOT format
@@ -432,7 +463,7 @@ if __name__ == '__main__':
     parser.add_argument('--save-conf', action='store_true', help='save confidences in --save-txt labels')
     parser.add_argument('--save-crop', action='store_true', help='save cropped prediction boxes')
     parser.add_argument('--nosave', action='store_true', help='do not save images/videos')
-    parser.add_argument('--classes', nargs='+', type=int, help='filter by class: --class 0, or --class 0 2 3')
+    parser.add_argument('--classes', default=2, nargs='+', type=int, help='filter by class: --class 0, or --class 0 2 3')
     parser.add_argument('--agnostic-nms', action='store_true', help='class-agnostic NMS')
     parser.add_argument('--augment', action='store_true', help='augmented inference')
     parser.add_argument('--update', action='store_true', help='update all models')
