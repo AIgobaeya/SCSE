@@ -8,6 +8,9 @@
 ## Output
 ![](./assets/test.gif)
 
+## Data flow
+![](./assets/dataflow.PNG)
+
 ### Reference
 - [YOLOv5](https://github.com/ultralytics/yolov5)
 - [YOLOv5+Deepsort](https://github.com/mikel-brostrom/Yolov5_DeepSort_Pytorch/blob/master/track.py)
